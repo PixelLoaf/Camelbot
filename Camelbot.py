@@ -1,24 +1,28 @@
 #!/usr/bin/env python
 
-import discord, asyncio, random, re, os, urllib.request
-
-prefixes = ["!"]
-
-admins = ["Staff", "Modder"]
+import discord, asyncio, random, re, os, urllib.request, json, knuckleheads
 
 pattern = re.compile("[^\s\"']+|\"([^\"]*)\"|'([^']*)'")
 
-commands = {}
+def changeSettings(toChange=None, value=None):
+	settings[toChange] = value
+	json.dump(settings, open("config.json", "w"))
 
-banned = ["189176328312979456"]
+settings = {}
+try:
+	settings = json.load(open("config.json"))
+except Exception as e:
+	settings = {}
+	changeSettings()
+	raise Exception (str(e) + ": please initialise the bot's settings in 'config.json' before using it")
+
+commands = {}
+adminCommands = {}
 
 try:
-	f = open("token.tkn").read()
-	Token = f
+	Token = settings['token']
 except Exception as e:
-	raise Exception (str(e) + ": please provide a valid Discord token in the token.tkn file!")
-
-pixelTotal = 10
+	raise Exception (str(e) + ": please set the 'token' value in config.json!")
 
 directions = [u"\u2196", u"\u2B06", u"\u2197", u"\u2B05", u"\u23FA", u"\u27A1", u"\u2199", u"\u2B07", u"\u2198"]
 
@@ -202,7 +206,7 @@ class pixelword():
 		self.reactionMessages = []
 		self.message = message
 		self.gameIndex = gameIndex
-		self.remaining = pixelTotal
+		self.remaining = settings[self.message.server.id]['totalLives']
 		await client.send_message(self.message.author, "Which word would you like to play?")
 		self.forwards = {message.author: self.gameIndex}
 	
@@ -257,13 +261,17 @@ class camel(discord.Client):
 	global commands
 	commands = {}
 	command = lambda f: commands.setdefault(f.__name__, f)
+	
+	global adminCommands
+	adminCommands = {}
+	adminCommand = lambda g: adminCommands.setdefault(g.__name__, g)
 
 	# Commands:
 
 	@command
 	async def help(self, message, *args): 
 		"""provides this help text"""
-		await client.send_message(message.author, "All commands: ```{}```".format("\n".join(["• " + i + " - " + commands[i].__doc__ for i in commands])))
+		await client.send_message(message.author, "All commands: ```{}```".format("\n".join(["• " + i + " - " + commands[i].__doc__ for i in commands if i not in settings[message.server.id]['disallowedCmds']])))
 
 	@command
 	async def apple(self, message, *args):
@@ -287,23 +295,37 @@ class camel(discord.Client):
 		"""starts a new game of connect 4"""
 		self.games.append(await connect(message, len(self.games)))
 
-	# Bot stuff
+	# Bot stuff and admin commands
+	
+	@adminCommand
+	async def help(self, message, *args): 
+		"""provides this help text"""
+		await client.send_message(message.author, "Admin commands: ```{}```".format("\n".join([*["• " + i + " - " + commands[i].__doc__ for i in commands], *["• " + i + " - " + adminCommands[i].__doc__ for i in adminCommands]])))	
 
-	@command
+	@adminCommand
 	async def test(self, message, *args):
-		"""tests the command error handler"""
+		"""allows admins to test the command error handler"""
 		await client.send_message(message.channel, "Raising exception...")
 		raise Exception ("Testing exception handler...")
 
-	@command
+	@adminCommand
 	async def shutdown(self, message, *args):
-		"""allows moderators to shut down the bot"""
-		if any([role.name in admins for role in message.author.roles]) and len(message.author.roles) > 1:
-			await client.send_message(message.channel, "Goodbye all!")
-			await client.logout()
-		else:
-			raise PermissionError ("Sorry, not gonna work, only admins can turn me off")
+		"""allows admins to shut down the bot"""
+		await client.send_message(message.channel, "Goodbye all!")
+		await client.logout()
 
+	@adminCommand
+	async def reloadconfig(self, message, *args):
+		"""allows admins to reload the bot's config file"""
+		global settings
+		try:
+			settings = json.load(open("config.json"))
+			await client.send_message(message.channel, "Config reloaded!")
+		except Exception as e:
+			settings = {}
+			changeSettings()
+			raise Exception (str(e) + ": please initialise the bot's settings in 'config.json' before using this command")
+		
 	async def on_ready(self):
 		print("------")
 		print(client.user.name)
@@ -317,13 +339,16 @@ class camel(discord.Client):
 			await self.send_message(message.channel, "***ＮＯ ＰＩＮＧ ＰＬＳ***")		
 
 	async def on_message(self, message): # Handles pretty much everything
+		
+		if type(message.channel) == discord.channel.PrivateChannel:
+			message.server = knuckleheads.jsDict({"id": "DM"})
 
-		if message.author == self.user or message.author.id in banned: 
+		if message.author == self.user or message.author.id in settings[message.server.id]['banned']: 
 			return
 
 		raw = message.content
 
-		data = [i.group(0) for i in re.finditer(pattern, raw) if any([raw.startswith(i) for i in prefixes])]
+		data = [i.group(0) for i in re.finditer(pattern, raw) if any([raw.startswith(i) for i in settings[message.server.id]["prefixes"]])]
 
 		if not data or len(message.content) < 2:
 			try:
@@ -349,11 +374,15 @@ class camel(discord.Client):
 						
 			return
 
-		command = {"command": data[0].lstrip("".join(prefixes)), "args": data[1:]}
+		command = {"command": data[0].lstrip("".join(settings[message.server.id]['prefixes'])), "args": data[1:]}
 
 		try:
-			global commands
-			await commands[command["command"]](self, message, *command["args"])
+			if command["command"] in adminCommands and type(message.channel) != discord.channel.PrivateChannel and any([role.name in settings[message.server.id]["admins"] for role in message.author.roles]) and len(message.author.roles) > 1:
+				await adminCommands[command["command"]](self, message, *command["args"])
+			elif command["command"] not in settings[message.server.id]['disallowedCmds']:
+				await commands[command["command"]](self, message, *command["args"])
+			else:
+				raise AttributeError
 
 		except AttributeError:
 			try:
@@ -366,7 +395,10 @@ class camel(discord.Client):
 			try:
 				self.tempchannel = message.channel
 				message.channel = message.author
-				await commands[command["command"]](message, *command["args"])
+				if any([role.name in settings[message.server.id]["admins"] for role in message.author.roles]) and len(message.author.roles) > 1:
+					await adminCommands[command["command"]](self, message, *command["args"])
+				else:
+					await commands[command["command"]](message, *command["args"])
 
 			except Exception as e:
 				await self.send_file(message.author, "data/Quality Twingo Memes/" + random.choice(os.listdir("data/Quality Twingo Memes")), content = "I don't have permission to post in #{} - please contact the server owner! In the meantime, here's a random Twingo meme:".format(self.tempchannel.name))
@@ -385,13 +417,13 @@ class camel(discord.Client):
 			except:
 				await client.send_message(message.author, "Something went wrong! Error details have been printed (tell Jynji to check bot logs).")
 
-
 	async def on_member_join(self, member): # Sends message to new users
 		if not member:
 			raise Exception ("Missing member argument")
 		print("Welcoming {.name} to server...".format(member))
 		server = member.server
-		await self.send_message(member, "Welcome to {1.name}, {0.name}! This server is basically a rebrand of Runouw right now - we hope you enjoy your stay!".format(member, server))
+		if settings[server.id]["welcome"]:
+			await self.send_message(member, settings[server.id]["welcomeMessage"].format(member, server))
 
 	# Multi-game interaction code
 
