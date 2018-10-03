@@ -218,7 +218,7 @@ class pixelword():
 			await client.send_message(message.author, "Invalid word!")
 			return
 		await client.send_message(self.message.channel, "Author: {}".format(message.author.display_name))
-		self.remainingMessage = await client.send_message(self.message.channel, "Remaining: {}".format("".join([":heart:"] * self.remaining + [":black_heart:"] * (pixelTotal - self.remaining))))
+		self.remainingMessage = await client.send_message(self.message.channel, "Remaining: {}".format("".join([":heart:"] * self.remaining + [":black_heart:"] * (settings[self.message.server.id]['totalLives'] - self.remaining))))
 		self.gameData = ["\_"] * len(self.word)
 		self.gameWord = await client.send_message(self.message.channel, "**{}**".format(" ".join(self.gameData)))
 		self.reactionMessages.extend([self.remainingMessage.id, self.gameWord.id])
@@ -236,10 +236,11 @@ class pixelword():
 					return
 				letterLocations = [i for i in range(len(self.word)) if self.word.startswith(letter, i)]
 				if letterLocations == []:
+					await client.remove_reaction(reaction.message, reaction.emoji, client.user)
 					self.remaining -= 1
-					await client.edit_message(self.remainingMessage, new_content = "Remaining: {}".format("".join([":heart:"] * self.remaining + [":black_heart:"] * (pixelTotal - self.remaining))))
+					await client.edit_message(self.remainingMessage, new_content = "Remaining: {}".format("".join([":heart:"] * self.remaining + [":black_heart:"] * (settings[self.message.server.id]['totalLives'] - self.remaining))))
 					if self.remaining <= 0:
-						await client.send_message(self.remainingMessage.channel, "All {} lives lost - the word was '{}'!".format(pixelTotal, self.word))
+						await client.send_message(self.remainingMessage.channel, "All {} lives lost - the word was '{}'!".format(settings[self.message.server.id]['totalLives'], self.word))
 						await self.endGame()
 					return
 				for i in letterLocations:
