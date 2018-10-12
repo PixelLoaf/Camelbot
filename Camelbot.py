@@ -153,24 +153,32 @@ class noughtsandcrosses():
 		self.message = message
 		self.gameIndex = gameIndex
 		self.players = []
-		self.playersMsg = await client.send_message(self.message.channel, ":o:: Waiting...\n:x:: Waiting...")
-		self.nextMsg = await client.send_message(self.message.channel, "Next: Waiting...")		
+		self.playersMsg = ":o:: Waiting...\n:x:: Waiting..."
+		self.nextMsg = "Next: Waiting..."		
+		self.metaMsg = await client.send_message(self.message.channel, await self.getMeta())
 		self.game = [":white_large_square:"] * 9
 		self.last_player = None
-		self.msg = await client.send_message(self.message.channel, "{}{}{}\n{}{}{}\n{}{}{}".format(*self.game[:3], *self.game[3:6], *self.game[6:]))
+		self.gameData = "{}{}{}\n{}{}{}\n{}{}{}".format(*self.game[:3], *self.game[3:6], *self.game[6:])
+		self.msg = await client.send_message(self.message.channel, self.gameData)
 		self.reactionMessages.extend([self.msg.id])
 		for i in directions:
 			await client.add_reaction(self.msg, "{}".format(i))	
+			
+	async def getMeta(self):
+		self.metaData = "\n".join([self.playersMsg, self.nextMsg])
+		return self.metaData
 		
 	async def refreshGameboard(self, message):
-		await client.edit_message(message, new_content = "{}{}{}\n{}{}{}\n{}{}{}".format(*self.game[:3], *self.game[3:6], *self.game[6:]))
-		print("{}{}{}\n{}{}{}\n{}{}{}\n".format(*self.game[:3], *self.game[3:6], *self.game[6:]).replace(":white_large_square:", "-").replace(":o:", "o").replace(":x:", "x"))
+		self.gameData = "{}{}{}\n{}{}{}\n{}{}{}".format(*self.game[:3], *self.game[3:6], *self.game[6:])
+		await client.edit_message(message, new_content = self.gameData)
 		self.sections = [self.game[:3], self.game[3:6], self.game[6:], [self.game[0], self.game[3], self.game[6]], [self.game[1], self.game[4], self.game[7]], [self.game[2], self.game[5], self.game[8]], [self.game[0], self.game[4], self.game[8]], [self.game[2], self.game[4], self.game[6]]]
 		for i in self.sections:
 			if i[0] == i[1] and i[1] == i[2]:
 				try:
 					self.winner = message.server.get_member(self.players[[":o:", ":x:"].index(i[0])])
 					await client.send_message(message.channel, "{} won!".format(self.winner.display_name))
+					self.nextMsg = "Winner: {}".format(self.winner.display_name)
+					await client.edit_message(self.metaMsg, new_content = await self.getMeta())					
 					await self.endGame()
 					return None
 				except:
@@ -184,12 +192,14 @@ class noughtsandcrosses():
 		if move is not None:
 			if len(self.players) < 2:
 				self.players.append(user.id)
-				await client.edit_message(self.playersMsg, new_content = ":o:: {}\n:x:: {}".format(self.playersMsg.server.get_member(self.players[0]).display_name, self.playersMsg.server.get_member(self.players[1]).display_name if len(self.players) > 1 else "Waiting..."))
+				self.playersMsg = ":o:: {}\n:x:: {}".format(self.msg.server.get_member(self.players[0]).display_name, self.metaMsg.server.get_member(self.players[1]).display_name if len(self.players) > 1 else "Waiting...")
+				await client.edit_message(self.metaMsg, new_content = await self.getMeta())									
 			if user.id in self.players and self.game[move] == ":white_large_square:" and self.last_player != user.id:
 				if self.last_player:
-					await client.edit_message(self.nextMsg, new_content = "Next: {}".format(self.playersMsg.server.get_member(self.last_player).display_name))
+					self.nextMsg = "Next: {}".format(self.metaMsg.server.get_member(self.last_player).display_name)
 				self.last_player = user.id
 				self.game[move] = [":o:", ":x:"][self.players.index(user.id)]
+				await client.edit_message(self.metaMsg, new_content = await self.getMeta())					
 				await self.refreshGameboard(reaction.message)		
 			
 	async def endGame(self):
